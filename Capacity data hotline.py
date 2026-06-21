@@ -121,7 +121,7 @@ kpi4.metric(label="Net Growth Velocity", value=f"{summary_net:+d}", delta=f"{sum
 
 st.markdown("---")
 
-# --- 5. CRASH-PROOF CUSTOM STYLING FUNCTIONS (BYPASSING BUGGY SUBSET ARGUMENT) ---
+# --- 5. CRASH-PROOF CUSTOM STYLING FUNCTIONS ---
 def style_channel_rows(row):
     """Applies green/red color styles exclusively to 'Net New Additions' column row-by-row"""
     styles = [''] * len(row)
@@ -165,17 +165,16 @@ with tab1:
     st.markdown("### Channel Wise Performance View")
     st.caption("Rows form chronological blocks by Channel matching layout **image_24f63b.png**. Click headers to sort columns.")
     
-    ch_display = df_filtered.sort_values(by=["Channel", "Week Start"], ascending=[True, True]).copy()
-    ch_display['Week Start'] = ch_display['Week Start'].dt.strftime('%d/%m/%Y')
+    # 🛠️ THE FIX: Group by Channel and Week Start to combine duplicate API records, ensuring a unique index
+    numeric_cols = ["Active TCs", "Retained TCs", "New TCs", "Resurrected TCs", "Churn", "Net New Additions"]
+    ch_agg = df_filtered.groupby(["Channel", "Week Start"])[numeric_cols].sum().reset_index()
     
-    ch_view = ch_display[[
-        "Channel", "Week Start", "Active TCs", "Retained TCs", "New TCs", "Resurrected TCs", "Churn", "Net New Additions"
-    ]]
-    ch_view.insert(2, "June Addition Target", "")
+    ch_agg.sort_values(by=["Channel", "Week Start"], ascending=[True, True], inplace=True)
+    ch_agg['Week Start'] = ch_agg['Week Start'].dt.strftime('%d/%m/%Y')
+    ch_agg.insert(2, "June Addition Target", "")
     
-    ch_grouped = ch_view.set_index(["Channel", "Week Start"])
+    ch_grouped = ch_agg.set_index(["Channel", "Week Start"])
     
-    # 🛠️ FIXED: Uses .apply() along axis=1 (row-wise) to circumvent the Pandas subset alignment bug
     st.dataframe(
         ch_grouped.style.apply(style_channel_rows, axis=1),
         use_container_width=True
@@ -188,25 +187,23 @@ with tab2:
     if "Region" not in df_filtered.columns or df_filtered["Region"].isnull().all():
         df_filtered["Region"] = "Unassigned"
         
-    region_display = df_filtered.sort_values(by=["Region", "Week Start"], ascending=[True, True]).copy()
-    region_display['Week Start'] = region_display['Week Start'].dt.strftime('%d/%m/%Y')
+    # 🛠️ THE FIX: Group by Region and Week Start to combine duplicate API records, ensuring a unique index
+    region_agg = df_filtered.groupby(["Region", "Week Start"])[numeric_cols].sum().reset_index()
     
-    region_view = region_display[[
-        "Region", "Week Start", "Active TCs", "Retained TCs", "New TCs", "Resurrected TCs", "Churn", "Net New Additions"
-    ]]
-    
-    region_view.rename(columns={
+    region_agg.sort_values(by=["Region", "Week Start"], ascending=[True, True], inplace=True)
+    region_agg.rename(columns={
         "Week Start": "Start",
         "Active TCs": "TCs",
         "Retained TCs": "Retained TCs",
         "Resurrected TCs": "ed TCs",
         "Net New Additions": "change"
     }, inplace=True)
-    region_view.insert(2, "Addition Target", "")
     
-    region_grouped = region_view.set_index(["Region", "Start"])
+    region_agg['Start'] = region_agg['Start'].dt.strftime('%d/%m/%Y')
+    region_agg.insert(2, "Addition Target", "")
     
-    # 🛠️ FIXED: Uses .apply() along axis=1 (row-wise) to circumvent the Pandas subset alignment bug
+    region_grouped = region_agg.set_index(["Region", "Start"])
+    
     st.dataframe(
         region_grouped.style.apply(style_region_rows, axis=1),
         use_container_width=True
@@ -216,19 +213,21 @@ with tab3:
     st.markdown("### TC Operational Health: Connectivity & Productivity")
     st.markdown("> **Data Story:** Tracks your active workforce conversions over time to expose operational drop-offs.")
     
-    prod_df = df_filtered.sort_values(by=["Channel", "Week Start"], ascending=[True, True]).copy()
+    # 🛠️ THE FIX: Group by Channel and Week Start to aggregate operational numbers before calculating percentages
+    prod_agg = df_filtered.groupby(["Channel", "Week Start"])[["Active TCs", "Connected TCs", "Productive TCs"]].sum().reset_index()
+    prod_agg.sort_values(by=["Channel", "Week Start"], ascending=[True, True], inplace=True)
     
-    prod_df['Connectivity Rate (%)'] = ((prod_df['Connected TCs'] / prod_df['Active TCs']) * 100).replace([np.inf, -np.inf], 0).fillna(0).round(1)
-    prod_df['Productivity Rate (%)'] = ((prod_df['Productive TCs'] / prod_df['Active TCs']) * 100).replace([np.inf, -np.inf], 0).fillna(0).round(1)
+    # Safely calculate percentages off the cleanly aggregated base numbers
+    prod_agg['Connectivity Rate (%)'] = ((prod_agg['Connected TCs'] / prod_agg['Active TCs']) * 100).replace([np.inf, -np.inf], 0).fillna(0).round(1)
+    prod_agg['Productivity Rate (%)'] = ((prod_agg['Productive TCs'] / prod_agg['Active TCs']) * 100).replace([np.inf, -np.inf], 0).fillna(0).round(1)
     
-    prod_df['Week Start Label'] = prod_df['Week Start'].dt.strftime('%d/%m/%Y')
-    prod_display = prod_df[[
+    prod_agg['Week Start Label'] = prod_agg['Week Start'].dt.strftime('%d/%m/%Y')
+    prod_display = prod_agg[[
         "Channel", "Week Start Label", "Active TCs", "Connected TCs", "Connectivity Rate (%)", "Productive TCs", "Productivity Rate (%)"
     ]].rename(columns={"Week Start Label": "Week Start"})
     
     prod_grouped = prod_display.set_index(["Channel", "Week Start"])
     
-    # 🛠️ FIXED: Computes custom colormap values manually along axis=0 to isolate target metrics safely
     st.dataframe(
         prod_grouped.style.apply(apply_operational_gradient, axis=0),
         use_container_width=True
