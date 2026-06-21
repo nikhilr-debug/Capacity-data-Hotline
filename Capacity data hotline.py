@@ -154,8 +154,9 @@ with tab1:
     # Format the timestamps for user friendly scannability
     ch_display['Week Start'] = ch_display['Week Start'].dt.strftime('%d/%m/%Y')
     
+    # 🛠️ FIXED: Changed .applymap() to .map() to support modern Pandas
     st.dataframe(
-        ch_display.style.applymap(apply_visual_styles, subset=['Net New Additions']),
+        ch_display.style.map(apply_visual_styles, subset=['Net New Additions']),
         use_container_width=True,
         hide_index=True
     )
@@ -184,8 +185,9 @@ with tab2:
     region_view.insert(2, "Addition Target", "")
     region_view['Start'] = pd.to_datetime(region_view['Start']).dt.strftime('%d/%m/%Y')
     
+    # 🛠️ FIXED: Changed .applymap() to .map() to support modern Pandas
     st.dataframe(
-        region_view.style.applymap(apply_visual_styles, subset=['change']),
+        region_view.style.map(apply_visual_styles, subset=['change']),
         use_container_width=True,
         hide_index=True
     )
