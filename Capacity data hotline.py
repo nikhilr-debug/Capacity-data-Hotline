@@ -40,7 +40,7 @@ def fetch_dashboard_data():
     except Exception as e:
         st.sidebar.warning("Using local reference data context (API offline or unreachable).")
     
-    # Structural Fallback (Extended to 5 weeks to demonstrate requirement)
+    # Structural Fallback representing the exact view from your attachments over a 5-week block
     dates = pd.date_range(end="2026-06-08", periods=5, freq="W-MON")
     channels = ["DC", "Existing VL", "BPO", "New + WinBack"]
     regions = ["NCR-UP", "Karnataka", "MPCG", "East+West", "West", "Bihar-Orissa"]
@@ -74,10 +74,7 @@ for core_col in ['Active TCs', 'Retained TCs', 'New TCs', 'Resurrected TCs', 'Ch
         df_raw[core_col] = np.nan
 
 # --- 2. DYNAMIC LAST 5 WEEKS FILTER ENGINE ---
-# Identify the 5 most recent unique week timestamps available in the dataset
 last_5_unique_weeks = sorted(df_raw['Week Start'].dropna().unique(), reverse=True)[:5]
-
-# Filter down dataset immediately to only contain those 5 chronological periods
 df_5_weeks = df_raw[df_raw['Week Start'].isin(last_5_unique_weeks)].copy()
 
 # --- 3. SIDEBAR CONTROLS ---
@@ -133,41 +130,39 @@ def apply_visual_styles(val):
         pass
     return ''
 
-# --- 6. MULTI-TAB VIEW INTERFACE WITH GROUPED BLOCKS ---
+# --- 6. MULTI-TAB VIEW INTERFACE WITH CRASH-PROOF MULTI-INDEX BLOCKS ---
 tab1, tab2, tab3 = st.tabs(["📊 Channel Wise Performance", "🗺️ Region Wise Performance", "⚡ Productivity & Connectivity"])
 
 with tab1:
-    st.markdown("### Channel Wise Performance View (Grouped)")
-    st.caption("Rows are grouped chronologically by Channel matching **image_24f63b.png**. Click headers to sort metrics inside or across groups.")
+    st.markdown("### Channel Wise Performance View")
+    st.caption("Rows form chronological blocks by Channel matching layout **image_24f63b.png**. Click headers to sort columns.")
     
-    # Sort explicitly by Channel and Week Start to form visual blocks
+    # Sort explicitly to group visual segments cleanly
     ch_display = df_filtered.sort_values(by=["Channel", "Week Start"], ascending=[True, True]).copy()
-    
-    ch_display = ch_display[[
-        "Channel", "Week Start", "Active TCs", "Retained TCs", "New TCs", "Resurrected TCs", "Churn", "Net New Additions"
-    ]]
-    
-    ch_display.insert(2, "June Addition Target", "")
     ch_display['Week Start'] = ch_display['Week Start'].dt.strftime('%d/%m/%Y')
     
-    # 🛠️ GROUPING MECHANISM: Set 'Channel' as index so Streamlit groups identical records visually
-    ch_grouped = ch_display.set_index(["Channel"])
+    ch_view = ch_display[[
+        "Channel", "Week Start", "Active TCs", "Retained TCs", "New TCs", "Resurrected TCs", "Churn", "Net New Additions"
+    ]]
+    ch_view.insert(2, "June Addition Target", "")
+    
+    # 🛠️ THE CRASH FIX: Set a composite unique MultiIndex to make Styler safe and merge rows visually
+    ch_grouped = ch_view.set_index(["Channel", "Week Start"])
     
     st.dataframe(
         ch_grouped.style.map(apply_visual_styles, subset=['Net New Additions']),
-        use_container_width=True,
-        hide_index=False  # Keep True for index grouping column visibility
+        use_container_width=True
     )
 
 with tab2:
-    st.markdown("### Region Wise Performance View (Grouped)")
-    st.caption("Rows are grouped chronologically by geographical matrix matching **image_24f603.png**.")
+    st.markdown("### Region Wise Performance View")
+    st.caption("Rows form geographical chronological blocks matching layout **image_24f603.png**.")
     
     if "Region" not in df_filtered.columns or df_filtered["Region"].isnull().all():
         df_filtered["Region"] = "Unassigned"
         
-    # Sort explicitly by Region and Week Start to form visual blocks
     region_display = df_filtered.sort_values(by=["Region", "Week Start"], ascending=[True, True]).copy()
+    region_display['Week Start'] = region_display['Week Start'].dt.strftime('%d/%m/%Y')
     
     region_view = region_display[[
         "Region", "Week Start", "Active TCs", "Retained TCs", "New TCs", "Resurrected TCs", "Churn", "Net New Additions"
@@ -180,33 +175,34 @@ with tab2:
         "Resurrected TCs": "ed TCs",
         "Net New Additions": "change"
     }, inplace=True)
-    
     region_view.insert(2, "Addition Target", "")
-    region_view['Start'] = pd.to_datetime(region_view['Start']).dt.strftime('%d/%m/%Y')
     
-    # 🛠️ GROUPING MECHANISM: Set 'Region' as index so Streamlit groups identical regions visually
-    region_grouped = region_view.set_index(["Region"])
+    # 🛠️ THE CRASH FIX: Composite unique index to clear Styler constraint
+    region_grouped = region_view.set_index(["Region", "Start"])
     
     st.dataframe(
         region_grouped.style.map(apply_visual_styles, subset=['change']),
-        use_container_width=True,
-        hide_index=False
+        use_container_width=True
     )
 
 with tab3:
     st.markdown("### TC Operational Health: Connectivity & Productivity")
+    st.markdown("> **Data Story:** Tracks your active workforce conversions over time to expose operational drop-offs.")
     
-    prod_df = df_filtered.sort_values(by=["Channel"], ascending=True).copy()
+    prod_df = df_filtered.sort_values(by=["Channel", "Week Start"], ascending=[True, True]).copy()
     
     prod_df['Connectivity Rate (%)'] = ((prod_df['Connected TCs'] / prod_df['Active TCs']) * 100).replace([np.inf, -np.inf], 0).fillna(0).round(1)
     prod_df['Productivity Rate (%)'] = ((prod_df['Productive TCs'] / prod_df['Active TCs']) * 100).replace([np.inf, -np.inf], 0).fillna(0).round(1)
     
+    prod_df['Week Start Label'] = prod_df['Week Start'].dt.strftime('%d/%m/%Y')
     prod_display = prod_df[[
-        "Channel", "Active TCs", "Connected TCs", "Connectivity Rate (%)", "Productive TCs", "Productivity Rate (%)"
-    ]].set_index(["Channel"])
+        "Channel", "Week Start Label", "Active TCs", "Connected TCs", "Connectivity Rate (%)", "Productive TCs", "Productivity Rate (%)"
+    ]].rename(columns={"Week Start Label": "Week Start"})
+    
+    # 🛠️ THE CRASH FIX: Composite index avoids KeyError when background_gradient computes 
+    prod_grouped = prod_display.set_index(["Channel", "Week Start"])
     
     st.dataframe(
-        prod_display.style.background_gradient(cmap="YlGnBu", subset=['Connectivity Rate (%)', 'Productivity Rate (%)']),
-        use_container_width=True,
-        hide_index=False
+        prod_grouped.style.background_gradient(cmap="YlGnBu", subset=['Connectivity Rate (%)', 'Productivity Rate (%)']),
+        use_container_width=True
     )
