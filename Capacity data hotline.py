@@ -23,15 +23,15 @@ def fetch_dashboard_data():
             data = response.json()['query_result']['data']['rows']
             df = pd.DataFrame(data)
             
-            # 🛠️ ALIGNED TO YOUR SQL: Mapping exact SQL outputs to the visual dashboard requirements
+            # ALIGNED TO YOUR SQL: Mapping exact SQL outputs to the visual dashboard requirements
             rename_map = {
                 'Channel': 'Channel', 'channel': 'Channel',
                 'Week Start': 'Week Start', 'week_start': 'Week Start',
                 'Active TCs': 'Active TCs', 'active_tcs': 'Active TCs', 
-                'Existing TCs': 'Retained TCs', 'existing_tcs': 'Retained TCs', # Maps SQL 'Existing TCs' to 'Retained'
+                'Existing TCs': 'Retained TCs', 'existing_tcs': 'Retained TCs',
                 'New TCs': 'New TCs', 'new_tcs': 'New TCs', 
                 'Resurrected TCs': 'Resurrected TCs', 'resurrected_tcs': 'Resurrected TCs', 
-                'Churned TCs': 'Churn', 'churned_tcs': 'Churn',                 # Maps SQL 'Churned TCs' to 'Churn'
+                'Churned TCs': 'Churn', 'churned_tcs': 'Churn',
                 'Net New Additions': 'Net New Additions', 'net_new_additions': 'Net New Additions',
                 'Region': 'Region', 'region': 'Region'
             }
@@ -74,55 +74,57 @@ def fetch_dashboard_data():
 
 df_raw = fetch_dashboard_data()
 
-# 🛠️ SAFETY NET: Initialize strictly required columns in case SQL returns empty datasets
+# SAFETY NET: Initialize strictly required columns in case SQL returns empty datasets
 for core_col in ['Active TCs', 'Retained TCs', 'New TCs', 'Resurrected TCs', 'Churn', 'Net New Additions']:
     if core_col not in df_raw.columns:
         df_raw[core_col] = np.nan
 
-# 🛠️ PROXY GENERATOR: Since "Connected TCs" & "Productive TCs" aren't in your SQL view yet, this creates proxy values so Tab 3 doesn't crash
+# PROXY GENERATOR: Since "Connected TCs" & "Productive TCs" aren't in your SQL view yet
 if 'Connected TCs' not in df_raw.columns:
     df_raw['Connected TCs'] = (df_raw['Active TCs'].fillna(0) * 0.8).astype(int)
 if 'Productive TCs' not in df_raw.columns:
     df_raw['Productive TCs'] = (df_raw['Active TCs'].fillna(0) * 0.6).astype(int)
 
 
-# --- 2. DYNAMIC LAST 5 WEEKS FILTER ENGINE ---
+# --- 2. DYNAMIC LAST 5 WEEKS BASE FILTER ---
 last_5_unique_weeks = sorted(df_raw['Week Start'].dropna().unique(), reverse=True)[:5]
 df_5_weeks = df_raw[df_raw['Week Start'].isin(last_5_unique_weeks)].copy()
 
-# --- 3. SIDEBAR CONTROLS ---
+# --- 3. SIDEBAR CONTROLS & DUAL DATASTREAMS ---
 st.sidebar.title("Dashboard Navigation")
 st.sidebar.markdown("---")
 
 view_mode = st.sidebar.radio(
-    "Select Performance Window:",
+    "Select KPI Summary Window:",
     options=["Week to Date (WTD)", "Month to Date (MTD)"],
     index=0,
-    help="WTD isolates the latest reporting week. MTD aggregates performance over the active month block within the 5-week window."
+    help="This changes the top Executive Summary cards. The tables below will always show the 5-week trend."
 )
 
 available_channels = df_5_weeks['Channel'].dropna().unique().tolist()
 selected_channels = st.sidebar.multiselect("Filter by Channel:", available_channels, default=available_channels)
 
-# Time Splicing Matrix logic
-latest_date = pd.to_datetime(df_5_weeks['Week Start'].max())
+# Stream 1: df_trend (ALWAYS 5 WEEKS for the tables)
+df_trend = df_5_weeks[df_5_weeks['Channel'].isin(selected_channels)]
 
+# Stream 2: df_kpi (Filtered dynamically by WTD/MTD for the top cards only)
+latest_date = pd.to_datetime(df_trend['Week Start'].max())
 if view_mode == "Week to Date (WTD)":
-    df_filtered = df_5_weeks[df_5_weeks['Week Start'] == latest_date]
+    df_kpi = df_trend[df_trend['Week Start'] == latest_date]
 else:
-    df_filtered = df_5_weeks[(df_5_weeks['Week Start'].dt.month == latest_date.month) & 
-                             (df_5_weeks['Week Start'].dt.year == latest_date.year)]
+    df_kpi = df_trend[(df_trend['Week Start'].dt.month == latest_date.month) & 
+                      (df_trend['Week Start'].dt.year == latest_date.year)]
 
-df_filtered = df_filtered[df_filtered['Channel'].isin(selected_channels)]
 
-# --- 4. HIGH-LEVEL EXECUTIVE SUMMARY ---
+# --- 4. HIGH-LEVEL EXECUTIVE SUMMARY (Powered by df_kpi) ---
 st.title("📈 Tele-Counselor (TC) Performance & Growth Dashboard")
-st.markdown(f"Displaying data tracking the **last 5 reporting weeks**. Current slice: **{view_mode}** ({latest_date.strftime('%d-%b-%Y')}).")
+st.markdown(f"Displaying **5-Week Trends** in tables. Top KPIs showing **{view_mode}** ({latest_date.strftime('%d-%b-%Y')}).")
 
-summary_active = int(df_filtered.drop_duplicates(subset=['Channel', 'Week Start'])['Active TCs'].sum()) if view_mode == "WTD" else int(df_filtered['Active TCs'].mean())
-summary_new = int(df_filtered['New TCs'].sum())
-summary_churn = int(df_filtered['Churn'].dropna().sum())
-summary_net = int(df_filtered['Net New Additions'].dropna().sum())
+# 🛠️ THE FIX: Removed drop_duplicates and mean(). Now cleanly SUMS the actual valid rows in the timeframe.
+summary_active = int(df_kpi['Active TCs'].sum()) 
+summary_new = int(df_kpi['New TCs'].sum())
+summary_churn = int(df_kpi['Churn'].dropna().sum())
+summary_net = int(df_kpi['Net New Additions'].dropna().sum())
 
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 kpi1.metric(label="Active TCs Headcount", value=f"{summary_active:,}")
@@ -166,15 +168,15 @@ def apply_operational_gradient(col):
     return [''] * len(col)
 
 
-# --- 6. MULTI-TAB VIEW INTERFACE WITH CRASH-PROOF MULTI-INDEX BLOCKS ---
+# --- 6. MULTI-TAB VIEW INTERFACE (Powered by df_trend for full 5-week history) ---
 tab1, tab2, tab3 = st.tabs(["📊 Channel Wise Performance", "🗺️ Region Wise Performance", "⚡ Productivity & Connectivity"])
 
 with tab1:
     st.markdown("### Channel Wise Performance View")
-    st.caption("Rows form chronological blocks by Channel matching layout **image_247242.png**.")
+    st.caption("Rows form chronological blocks by Channel representing the last 5 weeks.")
     
     numeric_cols = ["Active TCs", "Retained TCs", "New TCs", "Resurrected TCs", "Churn", "Net New Additions"]
-    ch_agg = df_filtered.groupby(["Channel", "Week Start"])[numeric_cols].sum().reset_index()
+    ch_agg = df_trend.groupby(["Channel", "Week Start"])[numeric_cols].sum().reset_index()
     
     ch_agg.sort_values(by=["Channel", "Week Start"], ascending=[True, True], inplace=True)
     ch_agg['Week Start'] = ch_agg['Week Start'].dt.strftime('%d/%m/%Y')
@@ -189,12 +191,12 @@ with tab1:
 
 with tab2:
     st.markdown("### Region Wise Performance View")
-    st.caption("Rows form geographical chronological blocks matching layout **image_24f603.png**.")
+    st.caption("Rows form geographical chronological blocks representing the last 5 weeks.")
     
-    if "Region" not in df_filtered.columns or df_filtered["Region"].isnull().all():
-        df_filtered["Region"] = "Unassigned"
+    if "Region" not in df_trend.columns or df_trend["Region"].isnull().all():
+        df_trend["Region"] = "Unassigned"
         
-    region_agg = df_filtered.groupby(["Region", "Week Start"])[numeric_cols].sum().reset_index()
+    region_agg = df_trend.groupby(["Region", "Week Start"])[numeric_cols].sum().reset_index()
     
     region_agg.sort_values(by=["Region", "Week Start"], ascending=[True, True], inplace=True)
     region_agg.rename(columns={
@@ -217,9 +219,9 @@ with tab2:
 
 with tab3:
     st.markdown("### TC Operational Health: Connectivity & Productivity")
-    st.markdown("> **Data Story:** Tracks your active workforce conversions over time to expose operational drop-offs.")
+    st.markdown("> **Data Story:** Tracks your active workforce conversions over the last 5 weeks to expose operational drop-offs.")
     
-    prod_agg = df_filtered.groupby(["Channel", "Week Start"])[["Active TCs", "Connected TCs", "Productive TCs"]].sum().reset_index()
+    prod_agg = df_trend.groupby(["Channel", "Week Start"])[["Active TCs", "Connected TCs", "Productive TCs"]].sum().reset_index()
     prod_agg.sort_values(by=["Channel", "Week Start"], ascending=[True, True], inplace=True)
     
     prod_agg['Connectivity Rate (%)'] = ((prod_agg['Connected TCs'] / prod_agg['Active TCs']) * 100).replace([np.inf, -np.inf], 0).fillna(0).round(1)
