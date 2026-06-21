@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import requests
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 # Set up page configuration for a wide, modern dashboard layout
 st.set_page_config(
@@ -119,16 +121,42 @@ kpi4.metric(label="Net Growth Velocity", value=f"{summary_net:+d}", delta=f"{sum
 
 st.markdown("---")
 
-# --- 5. CONDITIONAL FORMATTING GENERATOR ---
-def apply_visual_styles(val):
-    try:
+# --- 5. CRASH-PROOF CUSTOM STYLING FUNCTIONS (BYPASSING BUGGY SUBSET ARGUMENT) ---
+def style_channel_rows(row):
+    """Applies green/red color styles exclusively to 'Net New Additions' column row-by-row"""
+    styles = [''] * len(row)
+    val = row['Net New Additions']
+    if pd.notna(val):
+        idx = row.index.get_loc('Net New Additions')
         if val > 0:
-            return 'background-color: #d4edda; color: #155724; font-weight: bold;'
+            styles[idx] = 'background-color: #d4edda; color: #155724; font-weight: bold;'
         elif val < 0:
-            return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
-    except:
-        pass
-    return ''
+            styles[idx] = 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+    return styles
+
+def style_region_rows(row):
+    """Applies green/red color styles exclusively to 'change' column row-by-row"""
+    styles = [''] * len(row)
+    val = row['change']
+    if pd.notna(val):
+        idx = row.index.get_loc('change')
+        if val > 0:
+            styles[idx] = 'background-color: #d4edda; color: #155724; font-weight: bold;'
+        elif val < 0:
+            styles[idx] = 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+    return styles
+
+def apply_operational_gradient(col):
+    """Calculates background hex gradients column-by-column without breaking MultiIndex logic"""
+    if col.name in ['Connectivity Rate (%)', 'Productivity Rate (%)']:
+        vmin, vmax = col.min(), col.max()
+        if vmin == vmax:
+            return ['background-color: #e0f3db; color: #000000;'] * len(col)
+        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        cmap = plt.get_cmap("YlGnBu")
+        return [f"background-color: {mcolors.to_hex(cmap(norm(v)))}; color: #000000;" for v in col]
+    return [''] * len(col)
+
 
 # --- 6. MULTI-TAB VIEW INTERFACE WITH CRASH-PROOF MULTI-INDEX BLOCKS ---
 tab1, tab2, tab3 = st.tabs(["📊 Channel Wise Performance", "🗺️ Region Wise Performance", "⚡ Productivity & Connectivity"])
@@ -137,7 +165,6 @@ with tab1:
     st.markdown("### Channel Wise Performance View")
     st.caption("Rows form chronological blocks by Channel matching layout **image_24f63b.png**. Click headers to sort columns.")
     
-    # Sort explicitly to group visual segments cleanly
     ch_display = df_filtered.sort_values(by=["Channel", "Week Start"], ascending=[True, True]).copy()
     ch_display['Week Start'] = ch_display['Week Start'].dt.strftime('%d/%m/%Y')
     
@@ -146,11 +173,11 @@ with tab1:
     ]]
     ch_view.insert(2, "June Addition Target", "")
     
-    # 🛠️ THE CRASH FIX: Set a composite unique MultiIndex to make Styler safe and merge rows visually
     ch_grouped = ch_view.set_index(["Channel", "Week Start"])
     
+    # 🛠️ FIXED: Uses .apply() along axis=1 (row-wise) to circumvent the Pandas subset alignment bug
     st.dataframe(
-        ch_grouped.style.map(apply_visual_styles, subset=['Net New Additions']),
+        ch_grouped.style.apply(style_channel_rows, axis=1),
         use_container_width=True
     )
 
@@ -177,11 +204,11 @@ with tab2:
     }, inplace=True)
     region_view.insert(2, "Addition Target", "")
     
-    # 🛠️ THE CRASH FIX: Composite unique index to clear Styler constraint
     region_grouped = region_view.set_index(["Region", "Start"])
     
+    # 🛠️ FIXED: Uses .apply() along axis=1 (row-wise) to circumvent the Pandas subset alignment bug
     st.dataframe(
-        region_grouped.style.map(apply_visual_styles, subset=['change']),
+        region_grouped.style.apply(style_region_rows, axis=1),
         use_container_width=True
     )
 
@@ -199,10 +226,10 @@ with tab3:
         "Channel", "Week Start Label", "Active TCs", "Connected TCs", "Connectivity Rate (%)", "Productive TCs", "Productivity Rate (%)"
     ]].rename(columns={"Week Start Label": "Week Start"})
     
-    # 🛠️ THE CRASH FIX: Composite index avoids KeyError when background_gradient computes 
     prod_grouped = prod_display.set_index(["Channel", "Week Start"])
     
+    # 🛠️ FIXED: Computes custom colormap values manually along axis=0 to isolate target metrics safely
     st.dataframe(
-        prod_grouped.style.background_gradient(cmap="YlGnBu", subset=['Connectivity Rate (%)', 'Productivity Rate (%)']),
+        prod_grouped.style.apply(apply_operational_gradient, axis=0),
         use_container_width=True
     )
